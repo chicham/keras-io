@@ -33,9 +33,7 @@ at least TensorFlow 2.11 in order to use AdamW with mixed precision.
 """
 
 """shell
-pip install keras-cv==0.6.0 -q
-pip install -U tensorflow -q
-pip install keras-core -q
+pip install keras >=3.0 keras-cv>=0.7.1
 """
 
 """
