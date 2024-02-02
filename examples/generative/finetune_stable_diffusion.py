@@ -77,14 +77,14 @@ Don't worry if this sounds complicated. The code is much simpler than this!
 from textwrap import wrap
 import os
 
-import keras_cv
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-import tensorflow.experimental.numpy as tnp
-from keras_cv.models.stable_diffusion import SimpleTokenizer, DiffusionModel, ImageEncoder, NoiseScheduler, TextEncoder
 import keras
+import matplotlib.pyplot as plt
+import pandas as pd
+from keras_cv import models as models_cv
+from keras import ops, layers, utils, models
+import random
+import itertools
+import math
 
 """
 ## Data loading
@@ -97,7 +97,7 @@ dataset to fit better with `tf.data`. Refer to
 for more details.
 """
 
-data_path = tf.keras.utils.get_file(
+data_path = utils.get_file(
     origin="https://huggingface.co/datasets/sayakpaul/pokemon-blip-original-version/resolve/main/pokemon_dataset.tar.gz",
     untar=True,
 )
@@ -117,28 +117,8 @@ fine-tuning, so we can save some compute by doing this.
 Before we use the text encoder, we need to tokenize the captions.
 """
 
-# The padding token and maximum prompt length are specific to the text encoder.
-# If you're using a different text encoder be sure to change them accordingly.
-PADDING_TOKEN = 49407
-MAX_PROMPT_LENGTH = 77
-
-# Load the tokenizer.
-tokenizer = SimpleTokenizer()
-
-
-#  Method to tokenize and pad the tokens.
-def process_text(caption):
-    tokens = tokenizer.encode(caption)
-    tokens = tokens + [PADDING_TOKEN] * (MAX_PROMPT_LENGTH - len(tokens))
-    return np.array(tokens)
-
-
-# Collate the tokenized captions into an array.
-tokenized_texts = np.empty((len(data_frame), MAX_PROMPT_LENGTH))
-
+# Load the base model.
 all_captions = list(data_frame["caption"].values)
-for i, caption in enumerate(all_captions):
-    tokenized_texts[i] = process_text(caption)
 
 """
 ## Prepare a `tf.data.Dataset`
@@ -151,55 +131,111 @@ and their corresponding caption tokens. The section will include the following:
 * Shuffling and batching of the dataset.
 """
 
-RESOLUTION = 256
-AUTO = tf.data.AUTOTUNE
-POS_IDS = tf.convert_to_tensor([list(range(MAX_PROMPT_LENGTH))], dtype=tf.int32)
+# RESOLUTION = 256
+DEBUG = True
 
-augmenter = keras.Sequential(
+if DEBUG:
+    RESOLUTION = 256
+    BATCH_SIZE = 1
+else:
+    RESOLUTION = 256
+    BATCH_SIZE = 4
+
+MAX_PROMPT_LENGTH = 77
+SEED = 42
+USE_MP = True
+
+if USE_MP:
+    keras.mixed_precision.set_global_policy("mixed_float16")
+
+augmenter = models.Sequential(
     layers=[
-        keras_cv.layers.CenterCrop(RESOLUTION, RESOLUTION),
-        keras_cv.layers.RandomFlip(),
-        tf.keras.layers.Rescaling(scale=1.0 / 127.5, offset=-1),
+        layers.CenterCrop(RESOLUTION, RESOLUTION),
+        layers.RandomFlip(),
+        layers.Rescaling(scale=1.0 / 127.5, offset=-1),
     ]
 )
-text_encoder = TextEncoder(MAX_PROMPT_LENGTH)
 
 
-def process_image(image_path, tokenized_text):
-    image = tf.io.read_file(image_path)
-    image = tf.io.decode_png(image, 3)
-    image = tf.image.resize(image, (RESOLUTION, RESOLUTION))
-    return image, tokenized_text
+class PokemonBlipDataset(keras.utils.PyDataset):
+    def __init__(
+        self,
+        captions: list[str],
+        image_paths: list[str],
+        batch_size: int,
+        workers: int = 1,
+        tokenizer=None,
+        text_encoder=None,
+        use_multiprocessing: bool = False,
+        max_queue_size: int = 10,
+    ):
+        super().__init__(
+            workers=workers,
+            use_multiprocessing=use_multiprocessing,
+            max_queue_size=max_queue_size,
+        )
+        # TODO: randomize
+        self.captions = captions
+        self.image_paths = image_paths
+        self.batch_size = batch_size
 
+        if tokenizer is None:
+            tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
+        self.tokenizer = tokenizer
 
-def apply_augmentation(image_batch, token_batch):
-    return augmenter(image_batch), token_batch
+        if text_encoder is None:
+            text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
 
+        self.text_encoder = text_encoder
 
-def run_text_encoder(image_batch, token_batch):
-    return (
-        image_batch,
-        token_batch,
-        text_encoder([token_batch, POS_IDS], training=False),
-    )
+    @staticmethod
+    def _get_pos_ids():
+        return ops.expand_dims(ops.arange(MAX_PROMPT_LENGTH, dtype="int32"), 0)
 
+    def __getitem__(self, idx):
+        # Return x, y for batch idx.
+        low = idx * self.batch_size
+        # Cap upper bound at array length; the last batch may be smaller
+        # if the total number of items is not a multiple of batch size.
+        high = min(low + self.batch_size, len(self.captions))
 
-def prepare_dict(image_batch, token_batch, encoded_text_batch):
-    return {
-        "images": image_batch,
-        "tokens": token_batch,
-        "encoded_text": encoded_text_batch,
-    }
+        def transform_fn(image_path, caption):
+            image = utils.load_img(image_path, target_size=(RESOLUTION, RESOLUTION))
+            image = ops.convert_to_tensor(image)
+            tokens = self.tokenizer.encode(caption)
+            if len(tokens) > MAX_PROMPT_LENGTH:
+                raise ValueError(
+                    f"Prompt is too long (should be <= {MAX_PROMPT_LENGTH} tokens)"
+                )
+            # TODO: Retrieve the eof token from the tokenizer
+            tokens = ops.convert_to_tensor(
+                [tokens + [49407] * (MAX_PROMPT_LENGTH - len(tokens))]
+            )
+            encoded_caption = self.text_encoder.predict_on_batch(
+                {"tokens": tokens, "positions": self._get_pos_ids()}
+            )
+            return image, tokens, encoded_caption
 
+        batch_captions = self.captions[low:high]
+        batch_image_paths = self.image_paths[low:high]
 
-def prepare_dataset(image_paths, tokenized_texts, batch_size=1):
-    dataset = tf.data.Dataset.from_tensor_slices((image_paths, tokenized_texts))
-    dataset = dataset.shuffle(batch_size * 10)
-    dataset = dataset.map(process_image, num_parallel_calls=AUTO).batch(batch_size)
-    dataset = dataset.map(apply_augmentation, num_parallel_calls=AUTO)
-    dataset = dataset.map(run_text_encoder, num_parallel_calls=AUTO)
-    dataset = dataset.map(prepare_dict, num_parallel_calls=AUTO)
-    return dataset.prefetch(AUTO)
+        batch = [
+            transform_fn(img, caption)
+            for caption, img in zip(batch_captions, batch_image_paths)
+        ]
+        batch_images, batch_tokens, batch_encoded_captions = zip(*batch)
+        batch_images = augmenter(batch_images)
+        batch_encoded_captions = ops.concatenate(batch_encoded_captions)
+        batch_tokens = ops.concatenate(batch_tokens)
+        return {
+            "image": batch_images,
+            "token": batch_tokens,
+            "encoded_caption": batch_encoded_captions,
+        }
+
+    def __len__(self):
+        # Return number of batches.
+        return math.ceil(len(self.captions) / self.batch_size)
 
 
 """
@@ -211,15 +247,21 @@ interactive demonstrations, we kept the input resolution to 256x256.
 """
 
 # Prepare the dataset.
-training_dataset = prepare_dataset(
-    np.array(data_frame["image_path"]), tokenized_texts, batch_size=4
+tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
+text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
+
+training_dataset = PokemonBlipDataset(
+    captions=all_captions,
+    image_paths=data_frame["image_path"],
+    batch_size=BATCH_SIZE,
+    tokenizer=tokenizer,
+    text_encoder=text_encoder,
 )
-
 # Take a sample batch and investigate.
-sample_batch = next(iter(training_dataset))
+sample_batch = training_dataset[0]
 
-for k in sample_batch:
-    print(k, sample_batch[k].shape)
+for k, v in sample_batch.items():
+    print(k, ops.shape(v))
 
 """
 We can also take a look at the training images and their corresponding captions.
@@ -227,16 +269,17 @@ We can also take a look at the training images and their corresponding captions.
 
 plt.figure(figsize=(20, 10))
 
-for i in range(3):
+for i in range(BATCH_SIZE):
     ax = plt.subplot(1, 4, i + 1)
-    plt.imshow((sample_batch["images"][i] + 1) / 2)
+    plt.imshow((sample_batch["image"][i] + 1) / 2)
 
-    text = tokenizer.decode(sample_batch["tokens"][i].numpy().squeeze())
+    tokens = ops.convert_to_numpy(sample_batch["token"][i])
+    text = tokenizer.decode(tokens)
     text = text.replace("<|startoftext|>", "")
     text = text.replace("<|endoftext|>", "")
     text = "\n".join(wrap(text, 12))
-    plt.title(text, fontsize=15)
 
+    plt.title(text, fontsize=15)
     plt.axis("off")
 
 """
@@ -244,110 +287,75 @@ for i in range(3):
 """
 
 
-class Trainer(tf.keras.Model):
-    # Reference:
-    # https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image.py
-
+class StableDiffusionTrainer(keras.Model):
     def __init__(
-        self,
-        diffusion_model,
-        vae,
-        noise_scheduler,
-        use_mixed_precision=False,
-        max_grad_norm=1.0,
-        **kwargs
+        self, image_encoder, diffusion_model, noise_scheduler, seed: int = None
     ):
-        super().__init__(**kwargs)
+        super().__init__()
+        image_encoder.traiable = False
+        noise_scheduler.trainable = False
 
-        self.diffusion_model = diffusion_model
-        self.vae = vae
+        self.image_encoder = image_encoder
         self.noise_scheduler = noise_scheduler
-        self.max_grad_norm = max_grad_norm
+        self.diffusion_model = diffusion_model
+        self.seed_generator = keras.random.SeedGenerator(seed)
 
-        self.use_mixed_precision = use_mixed_precision
-        self.vae.trainable = False
-
-    def train_step(self, inputs):
-        images = inputs["images"]
-        encoded_text = inputs["encoded_text"]
-        batch_size = tf.shape(images)[0]
-
-        with tf.GradientTape() as tape:
-            # Project image into the latent space and sample from it.
-            latents = self.sample_from_encoder_outputs(self.vae(images, training=False))
-            # Know more about the magic number here:
-            # https://keras.io/examples/generative/fine_tune_via_textual_inversion/
-            latents = latents * 0.18215
-
-            # Sample noise that we'll add to the latents.
-            noise = tf.random.normal(tf.shape(latents))
-
-            # Sample a random timestep for each image.
-            timesteps = tnp.random.randint(
-                0, self.noise_scheduler.train_timesteps, (batch_size,)
-            )
-
-            # Add noise to the latents according to the noise magnitude at each timestep
-            # (this is the forward diffusion process).
-            noisy_latents = self.noise_scheduler.add_noise(
-                tf.cast(latents, noise.dtype), noise, timesteps
-            )
-
-            # Get the target for loss depending on the prediction type
-            # just the sampled noise for now.
-            target = noise  # noise_schedule.predict_epsilon == True
-
-            # Predict the noise residual and compute loss.
-            timestep_embedding = tf.map_fn(
-                lambda t: self.get_timestep_embedding(t), timesteps, dtype=tf.float32
-            )
-            timestep_embedding = tf.squeeze(timestep_embedding, 1)
-            model_pred = self.diffusion_model(
-                [noisy_latents, timestep_embedding, encoded_text], training=True
-            )
-            loss = self.compiled_loss(target, model_pred)
-            if self.use_mixed_precision:
-                loss = self.optimizer.get_scaled_loss(loss)
-
-        # Update parameters of the diffusion model.
-        trainable_vars = self.diffusion_model.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
-        if self.use_mixed_precision:
-            gradients = self.optimizer.get_unscaled_gradients(gradients)
-        gradients = [tf.clip_by_norm(g, self.max_grad_norm) for g in gradients]
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def get_timestep_embedding(self, timestep, dim=320, max_period=10000):
+    def _get_timestep_embedding(self, timestep, batch_size, dim=320, max_period=10000):
         half = dim // 2
-        log_max_period = tf.math.log(tf.cast(max_period, tf.float32))
-        freqs = tf.math.exp(
-            -log_max_period * tf.range(0, half, dtype=tf.float32) / half
-        )
-        args = tf.convert_to_tensor([timestep], dtype=tf.float32) * freqs
-        embedding = tf.concat([tf.math.cos(args), tf.math.sin(args)], 0)
-        embedding = tf.reshape(embedding, [1, -1])
-        return embedding
+        range = ops.cast(ops.arange(0, half), "float32")
+        freqs = ops.exp(-math.log(max_period) * range / half)
+        args = ops.convert_to_tensor([timestep], dtype="float32") * freqs
+        embedding = ops.concatenate([ops.cos(args), ops.sin(args)], 0)
+        embedding = ops.reshape(embedding, [1, -1])
+        return ops.repeat(embedding, batch_size, axis=0)
 
-    def sample_from_encoder_outputs(self, outputs):
-        mean, logvar = tf.split(outputs, 2, axis=-1)
-        logvar = tf.clip_by_value(logvar, -30.0, 20.0)
-        std = tf.exp(0.5 * logvar)
-        sample = tf.random.normal(tf.shape(mean), dtype=mean.dtype)
-        return mean + std * sample
+    def call(self, inputs, training=False):
+        x, y = self._prepare_inputs_for_training(inputs)
+        preds = self.diffusion_model(x)
+        return preds
 
-    def save_weights(self, filepath, overwrite=True, save_format=None, options=None):
-        # Overriding this method will allow us to use the `ModelCheckpoint`
-        # callback directly with this trainer class. In this case, it will
-        # only checkpoint the `diffusion_model` since that's what we're training
-        # during fine-tuning.
-        self.diffusion_model.save_weights(
-            filepath=filepath,
-            overwrite=overwrite,
-            save_format=save_format,
-            options=options,
+    def _prepare_inputs_for_training(self, inputs):
+        images = inputs["image"]
+        encoded_caption = inputs["encoded_caption"]
+        batch_size = ops.shape(images)[0]
+        # TODO: we should sample from the image encoder
+        latents = self.image_encoder(images)
+        # latents = latents * 0.18215
+        noise = keras.random.normal(ops.shape(latents), seed=self.seed_generator)
+        timesteps = keras.random.randint(
+            (batch_size,),
+            0,
+            self.noise_scheduler.train_timesteps,
+            seed=self.seed_generator,
         )
+        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        # TODO: the embedding function must computes only 1 embedding
+        timesteps_embeddings = ops.concatenate(
+            [self._get_timestep_embedding(timestep, 1) for timestep in timesteps]
+        )
+
+        output = {
+            "latent": noisy_latents,
+            "timestep_embedding": timesteps_embeddings,
+            "context": encoded_caption,
+        }
+        return output, noise
+
+    def train_step(self, *args):
+        breakpoint()
+        state, inputs = args
+        x, y = self._prepare_inputs_for_training(inputs)
+        # TODO: make a function that prepare the input according to the backend
+        ret = super().train_step(state, (x, y))
+
+        # if backend == "torch":
+        #     _pt_train_step(data)
+        # elif backend == "jax":
+        #     _jax_train_step(data)
+        # elif backend == "tensorflow":
+        #     _tf_train_step(data)
+
+        return ret
 
 
 """
@@ -366,21 +374,14 @@ of brevity, we discard those elements. More on this later in the tutorial.
 """
 
 # Enable mixed-precision training if the underlying GPU has tensor cores.
-USE_MP = True
-if USE_MP:
-    keras.mixed_precision.set_global_policy("mixed_float16")
 
-image_encoder = ImageEncoder()
-diffusion_ft_trainer = Trainer(
-    diffusion_model=DiffusionModel(RESOLUTION, RESOLUTION, MAX_PROMPT_LENGTH),
-    # Remove the top layer from the encoder, which cuts off the variance and only
-    # returns the mean.
-    vae=tf.keras.Model(
-        image_encoder.input,
-        image_encoder.layers[-2].output,
-    ),
-    noise_scheduler=NoiseScheduler(),
-    use_mixed_precision=USE_MP,
+diffusion_model = models_cv.stable_diffusion.DiffusionModel(
+    RESOLUTION, RESOLUTION, MAX_PROMPT_LENGTH
+)
+diffusion_trainer = StableDiffusionTrainer(
+    image_encoder=models_cv.stable_diffusion.ImageEncoder(),
+    diffusion_model=diffusion_model,
+    noise_scheduler=models_cv.stable_diffusion.NoiseScheduler(),
 )
 
 # These hyperparameters come from this tutorial by Hugging Face:
@@ -390,14 +391,19 @@ beta_1, beta_2 = 0.9, 0.999
 weight_decay = (1e-2,)
 epsilon = 1e-08
 
-optimizer = tf.keras.optimizers.experimental.AdamW(
+optimizer = keras.optimizers.AdamW(
     learning_rate=lr,
     weight_decay=weight_decay,
     beta_1=beta_1,
     beta_2=beta_2,
     epsilon=epsilon,
 )
-diffusion_ft_trainer.compile(optimizer=optimizer, loss="mse")
+
+diffusion_trainer.compile(
+    optimizer=optimizer,
+    loss="mse",
+    run_eagerly=True,
+)
 
 """
 ## Fine-tuning
@@ -406,14 +412,15 @@ To keep the runtime of this tutorial short, we just fine-tune for an epoch.
 """
 
 epochs = 1
-ckpt_path = "finetuned_stable_diffusion.h5"
-ckpt_callback = tf.keras.callbacks.ModelCheckpoint(
+ckpt_path = "finetuned_stable_diffusion.weights.h5"
+ckpt_callback = keras.callbacks.ModelCheckpoint(
     ckpt_path,
     save_weights_only=True,
     monitor="loss",
     mode="min",
 )
-diffusion_ft_trainer.fit(training_dataset, epochs=epochs, callbacks=[ckpt_callback])
+
+diffusion_trainer.fit(training_dataset, epochs=epochs, callbacks=[ckpt_callback])
 
 """
 ## Inference
