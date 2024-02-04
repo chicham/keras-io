@@ -342,7 +342,6 @@ class StableDiffusionTrainer(keras.Model):
         return output, noise
 
     def train_step(self, *args):
-        breakpoint()
         state, inputs = args
         x, y = self._prepare_inputs_for_training(inputs)
         # TODO: make a function that prepare the input according to the backend
