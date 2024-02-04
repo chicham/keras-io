@@ -319,7 +319,7 @@ class StableDiffusionTrainer(keras.Model):
         encoded_caption = inputs["encoded_caption"]
         batch_size = ops.shape(images)[0]
         # TODO: we should sample from the image encoder
-        latents = self.image_encoder(images)
+        latents = self.image_encoder.predict_on_batch(images)
         # latents = latents * 0.18215
         noise = keras.random.normal(ops.shape(latents), seed=self.seed_generator)
         timesteps = keras.random.randint(
