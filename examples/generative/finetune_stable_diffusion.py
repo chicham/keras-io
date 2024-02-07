@@ -156,43 +156,20 @@ augmenter = models.Sequential(
     ]
 )
 
-
-def prepare_inputs_for_training(image_encoder, noise_scheduler, inputs, seed_generator):
-    images = inputs["image"]
-    encoded_caption = inputs["encoded_caption"]
-    batch_size = ops.shape(images)[0]
-    # TODO: we should sample from the image encoder
-    latents = image_encoder.predict_on_batch(images)
-    # latents = latents * 0.18215 -> inside image encoder
-    noise = keras.random.normal(ops.shape(latents), seed=seed_generator)
-    timesteps = keras.random.randint(
-        (batch_size,),
-        0,
-        noise_scheduler.train_timesteps,
-        seed=seed_generator,
-    )
-    noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-    # TODO: the embedding function must computes only 1 embedding
-    timesteps_embeddings = ops.concatenate(
-        [get_timestep_embedding(timestep) for timestep in timesteps]
-    )
-
-    output = {
-        "latent": noisy_latents,
-        "timestep_embedding": timesteps_embeddings,
-        "context": encoded_caption,
-    }
-    return output, noise
-
-
-def get_timestep_embedding(timestep, batch_size, dim=320, max_period=10000):
+def get_timestep_embeddings(timesteps, dim=320, max_period=10000, dtype="float32"):
     half = dim // 2
-    span = ops.cast(ops.arange(0, half), "float32")
-    freqs = ops.exp(-math.log(max_period) * span / half)
-    args = ops.convert_to_tensor([timestep], dtype="float32") * freqs
-    embedding = ops.concatenate([ops.cos(args), ops.sin(args)], 0)
-    embedding = ops.reshape(embedding, [1, -1])
-    return embedding
+    span = ops.cast(ops.arange(0, half), dtype=dtype)
+    span = ops.reshape(span, (1, -1))
+    freqs = ops.exp(-ops.log(max_period) * span / half)
+    timesteps = ops.cast(timesteps, dtype=dtype)
+    timesteps = ops.reshape(timesteps, (-1, 1))
+    args = timesteps * freqs
+    embeddings = ops.concatenate([ops.cos(args), ops.sin(args)], axis=1)
+    return embeddings
+
+def get_pos_ids():
+    # TODO(hicham): Can be a constant ?
+    return ops.expand_dims(ops.arange(MAX_PROMPT_LENGTH, dtype="int32"), 0)
 
 
 class PokemonBlipDataset(keras.utils.PyDataset):
@@ -204,6 +181,8 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         workers: int = 1,
         tokenizer=None,
         text_encoder=None,
+        image_encoder=None,
+        seed=42,
         use_multiprocessing: bool = False,
         max_queue_size: int = 10,
     ):
@@ -226,9 +205,11 @@ class PokemonBlipDataset(keras.utils.PyDataset):
 
         self.text_encoder = text_encoder
 
-    @staticmethod
-    def _get_pos_ids():
-        return ops.expand_dims(ops.arange(MAX_PROMPT_LENGTH, dtype="int32"), 0)
+        if image_encoder is None:
+            image_encoder = models_cv.stable_diffusion.ImageEncoder(MAX_PROMPT_LENGTH)
+
+        self.image_encoder = image_encoder
+        self.seed_generator = keras.random.SeedGenerator(seed=seed)
 
     def __getitem__(self, idx):
         # Return x, y for batch idx.
@@ -249,10 +230,8 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             tokens = ops.convert_to_tensor(
                 [tokens + [49407] * (MAX_PROMPT_LENGTH - len(tokens))]
             )
-            encoded_caption = self.text_encoder.predict_on_batch(
-                {"tokens": tokens, "positions": self._get_pos_ids()}
-            )
-            return image, tokens, encoded_caption
+
+            return image, tokens
 
         batch_captions = self.captions[low:high]
         batch_image_paths = self.image_paths[low:high]
@@ -261,16 +240,26 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             transform_fn(img, caption)
             for caption, img in zip(batch_captions, batch_image_paths)
         ]
-        batch_images, batch_tokens, batch_encoded_captions = zip(*batch)
+        batch_images, batch_tokens = zip(*batch)
+
+        batch_context = self.text_encoder.predict_on_batch(
+            [batch_tokens, get_pos_ids()]
+        )
         batch_images = augmenter(batch_images)
-        batch_encoded_captions = ops.concatenate(batch_encoded_captions)
         batch_tokens = ops.concatenate(batch_tokens)
+        batch_latents = self.image_encoder.predict_on_batch(batch_images)
+
+
         inputs = {
             "image": batch_images,
             "token": batch_tokens,
-            "encoded_caption": batch_encoded_captions,
+            "context": batch_context,
+            "latent": batch_latents,
         }
-        return inputs
+        targets = keras.random.normal(
+            ops.shape(batch_latents), seed=self.seed_generator
+        )
+        return inputs, targets
 
     def __len__(self):
         # Return number of batches.
@@ -288,6 +277,7 @@ interactive demonstrations, we kept the input resolution to 256x256.
 # Prepare the dataset.
 tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
 text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
+image_encoder = models_cv.stable_diffusion.ImageEncoder()
 
 training_dataset = PokemonBlipDataset(
     captions=all_captions,
@@ -295,9 +285,10 @@ training_dataset = PokemonBlipDataset(
     batch_size=BATCH_SIZE,
     tokenizer=tokenizer,
     text_encoder=text_encoder,
+    image_encoder=image_encoder,
 )
 # Take a sample batch and investigate.
-sample_batch = training_dataset[0]
+sample_batch, _ = training_dataset[0]
 
 for k, v in sample_batch.items():
     print(k, ops.shape(v))
@@ -327,33 +318,52 @@ for i in range(BATCH_SIZE):
 
 
 class StableDiffusionTrainer(keras.Model):
-    def __init__(
-        self, diffusion_model, seed: int = None
-    ):
+    def __init__(self, diffusion_model, noise_scheduler, seed: int = None):
         super().__init__()
         self.diffusion_model = diffusion_model
+        self.noise_scheduler = noise_scheduler
         self.seed_generator = keras.random.SeedGenerator(seed)
 
+    def call(self, inputs):
+        if "timestep_embedding" not in inputs:
+            batch_size = ops.shape(inputs["latent"])[0]
+            timesteps = ops.arange(0, batch_size)
+            timestep_embeddings = get_timestep_embeddings(timesteps)
+            inputs["timestep_embedding"] = timestep_embeddings
 
-    def call(self, inputs, training=False):
-        breakpoint()
         preds = self.diffusion_model(inputs)
         return preds
 
-
     def train_step(self, *args):
-        # TODO: make a function that prepare the input according to the backend
+        backend = keras.backend.backend()
 
-        # if backend == "torch":
+        if backend == "jax":
+            state, (inputs, targets) = args
+        # elif backend == "torch":
         #     _pt_train_step(data)
-        # elif backend == "jax":
-        #     _jax_train_step(data)
-        state, inputs = args
-        breakpoint()
-        ret = super().train_step(state, inputs)
         # elif backend == "tensorflow":
         #     _tf_train_step(data)
 
+        batch_size = ops.shape(inputs)[0]
+        timesteps = keras.random.randint(
+            (batch_size,),
+            0,
+            self.noise_scheduler.train_timesteps,
+            seed=self.seed_generator,
+        )
+        timesteps_embeddings = get_timestep_embeddings(timesteps)
+
+        latents = inputs["latent"]
+        noise = keras.random.normal(ops.shape(latents), seed=self.seed_generator)
+        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        inputs = {
+            "latent": noisy_latents,
+            "timestep_embedding": timesteps_embeddings,
+            "context": inputs["context"]
+        }
+
+        # TODO: test with more than 16G of memory
+        ret = super().train_step(state, (inputs, targets))
         return ret
 
 
@@ -379,6 +389,7 @@ diffusion_model = models_cv.stable_diffusion.DiffusionModel(
 )
 diffusion_trainer = StableDiffusionTrainer(
     diffusion_model=diffusion_model,
+    noise_scheduler=models_cv.stable_diffusion.NoiseScheduler(),
 )
 
 # These hyperparameters come from this tutorial by Hugging Face:
