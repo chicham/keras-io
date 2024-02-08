@@ -240,9 +240,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         batch_images, batch_tokens = zip(*batch)
         batch_tokens = ops.concatenate(batch_tokens)
         pos_ids = ops.repeat(get_pos_ids(), self.batch_size, axis=0)
-        batch_context = self.text_encoder.predict_on_batch(
-            [batch_tokens, pos_ids]
-        )
+        batch_context = self.text_encoder.predict_on_batch([batch_tokens, pos_ids])
         batch_images = augmenter(batch_images)
         batch_latents = self.image_encoder.predict_on_batch(batch_images)
 
@@ -366,9 +364,9 @@ class StableDiffusionTrainer(keras.Model):
         if backend == "jax":
             data = state, (new_inputs, targets)
         else:
-            data = (new_inputs, targets)
+            data = ((new_inputs, targets),)
 
-        return super().train_step(data)
+        return super().train_step(*data)
 
 
 """
@@ -411,11 +409,7 @@ optimizer = keras.optimizers.AdamW(
     epsilon=epsilon,
 )
 
-diffusion_trainer.compile(
-    optimizer=optimizer,
-    loss="mse",
-    run_eagerly=DEBUG
-)
+diffusion_trainer.compile(optimizer=optimizer, loss="mse", run_eagerly=DEBUG)
 
 """
 ## Fine-tuning
