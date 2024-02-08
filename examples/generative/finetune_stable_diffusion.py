@@ -339,7 +339,7 @@ class StableDiffusionTrainer(keras.Model):
         if backend == "jax":
             state, (inputs, targets) = data
         else:
-            inputs, targets = data
+            (inputs, targets), = data
 
         batch_size = ops.shape(inputs["latent"])[0]
         timesteps = keras.random.randint(
