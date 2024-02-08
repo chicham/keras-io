@@ -150,6 +150,7 @@ augmenter = models.Sequential(
     ]
 )
 
+
 def get_timestep_embeddings(timesteps, dim=320, max_period=10000, dtype="float32"):
     half = dim // 2
     span = ops.cast(ops.arange(0, half), dtype=dtype)
@@ -160,6 +161,7 @@ def get_timestep_embeddings(timesteps, dim=320, max_period=10000, dtype="float32
     args = timesteps * freqs
     embeddings = ops.concatenate([ops.cos(args), ops.sin(args)], axis=1)
     return embeddings
+
 
 def get_pos_ids():
     # TODO(hicham): Can be a constant ?
@@ -243,16 +245,13 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         batch_tokens = ops.concatenate(batch_tokens)
         batch_latents = self.image_encoder.predict_on_batch(batch_images)
 
-
         inputs = {
             "image": batch_images,
             "token": batch_tokens,
             "context": batch_context,
             "latent": batch_latents,
         }
-        targets = keras.random.normal(
-            ops.shape(batch_latents), seed=self.seed
-        )
+        targets = keras.random.normal(ops.shape(batch_latents), seed=self.seed)
         return inputs, targets
 
     def __len__(self):
@@ -328,16 +327,14 @@ class StableDiffusionTrainer(keras.Model):
         preds = self.diffusion_model(inputs)
         return preds
 
-    def train_step(self, *args):
+    def train_step(self, *data):
         backend = keras.backend.backend()
 
         # TODO: Add other backend
         if backend == "jax":
-            state, (inputs, targets) = args
-        # elif backend == "torch":
-        #     _pt_train_step(data)
-        # elif backend == "tensorflow":
-        #     _tf_train_step(data)
+            state, (inputs, targets) = data
+        else:
+            (inputs, targets), _ = data
 
         batch_size = ops.shape(inputs["latent"])[0]
         timesteps = keras.random.randint(
@@ -351,15 +348,20 @@ class StableDiffusionTrainer(keras.Model):
         latents = inputs["latent"]
         noise = keras.random.normal(ops.shape(latents), seed=self.seed)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-        inputs = {
+        new_inputs = {
             "latent": noisy_latents,
             "timestep_embedding": timesteps_embeddings,
-            "context": inputs["context"]
+            "context": inputs["context"],
         }
 
         # TODO: Modify to support other backends
-        ret = super().train_step(state, (inputs, targets))
-        return ret
+
+        if backend == "jax":
+            data = state, (new_inputs, targets)
+        else:
+            data = (new_inputs, targets)
+
+        return super().train_step(data)
 
 
 """
@@ -444,9 +446,7 @@ weights_path = keras.utils.get_file(
 )
 
 img_height = img_width = RESOLUTION
-pokemon_model = models_cv.StableDiffusion(
-    img_width=img_width, img_height=img_height
-)
+pokemon_model = models_cv.StableDiffusion(img_width=img_width, img_height=img_height)
 # We just reload the weights of the fine-tuned diffusion model.
 pokemon_model.diffusion_model.load_weights(weights_path)
 
