@@ -320,8 +320,8 @@ class StableDiffusionTrainer(keras.Model):
 
     def call(self, inputs):
         new_inputs = {
-            "latent": input["latent"],
-            "context": input["context"],
+            "latent": inputs["latent"],
+            "context": inputs["context"],
         }
         if "timestep_embedding" not in inputs:
             batch_size = ops.shape(inputs["latent"])[0]
