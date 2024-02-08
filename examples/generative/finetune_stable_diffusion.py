@@ -238,12 +238,12 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             for caption, img in zip(batch_captions, batch_image_paths)
         ]
         batch_images, batch_tokens = zip(*batch)
-
+        batch_tokens = ops.concatenate(batch_tokens)
+        pos_ids = ops.repeat(get_pos_ids(), self.batch_size, axis=0)
         batch_context = self.text_encoder.predict_on_batch(
-            [batch_tokens, get_pos_ids()]
+            [batch_tokens, pos_ids]
         )
         batch_images = augmenter(batch_images)
-        batch_tokens = ops.concatenate(batch_tokens)
         batch_latents = self.image_encoder.predict_on_batch(batch_images)
 
         inputs = {
@@ -319,13 +319,19 @@ class StableDiffusionTrainer(keras.Model):
         self.seed = seed
 
     def call(self, inputs):
+        new_inputs = {
+            "latent": input["latent"],
+            "context": input["context"],
+        }
         if "timestep_embedding" not in inputs:
             batch_size = ops.shape(inputs["latent"])[0]
             timesteps = ops.arange(0, batch_size)
             timestep_embeddings = get_timestep_embeddings(timesteps)
-            inputs["timestep_embedding"] = timestep_embeddings
+            new_inputs["timestep_embedding"] = timestep_embeddings
+        else:
+            new_inputs["timestep_embedding"] = inputs["timestep_embedding"]
 
-        preds = self.diffusion_model(inputs)
+        preds = self.diffusion_model(new_inputs)
         return preds
 
     def train_step(self, *data):
@@ -408,7 +414,7 @@ optimizer = keras.optimizers.AdamW(
 diffusion_trainer.compile(
     optimizer=optimizer,
     loss="mse",
-    run_eagerly=DEBUG,
+    run_eagerly=DEBUG
 )
 
 """
