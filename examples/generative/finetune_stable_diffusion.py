@@ -362,11 +362,9 @@ class StableDiffusionTrainer(keras.Model):
         # TODO: Modify to support other backends
 
         if backend == "jax":
-            data = state, (new_inputs, targets)
-        else:
-            data = ((new_inputs, targets),)
+            return super().train_step(state, (new_inputs, targets))
 
-        return super().train_step(*data)
+        return super().train_step((new_inputs, targets))
 
 
 """
