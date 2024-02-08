@@ -209,7 +209,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             image_encoder = models_cv.stable_diffusion.ImageEncoder(MAX_PROMPT_LENGTH)
 
         self.image_encoder = image_encoder
-        self.seed_generator = keras.random.SeedGenerator(seed=seed)
+        self.seed = seed
 
     def __getitem__(self, idx):
         # Return x, y for batch idx.
@@ -257,7 +257,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             "latent": batch_latents,
         }
         targets = keras.random.normal(
-            ops.shape(batch_latents), seed=self.seed_generator
+            ops.shape(batch_latents), seed=self.seed
         )
         return inputs, targets
 
@@ -322,7 +322,7 @@ class StableDiffusionTrainer(keras.Model):
         super().__init__()
         self.diffusion_model = diffusion_model
         self.noise_scheduler = noise_scheduler
-        self.seed_generator = keras.random.SeedGenerator(seed)
+        self.seed = seed
 
     def call(self, inputs):
         if "timestep_embedding" not in inputs:
@@ -344,17 +344,17 @@ class StableDiffusionTrainer(keras.Model):
         # elif backend == "tensorflow":
         #     _tf_train_step(data)
 
-        batch_size = ops.shape(inputs)[0]
+        batch_size = ops.shape(inputs["latent"])[0]
         timesteps = keras.random.randint(
             (batch_size,),
             0,
             self.noise_scheduler.train_timesteps,
-            seed=self.seed_generator,
+            seed=self.seed,
         )
         timesteps_embeddings = get_timestep_embeddings(timesteps)
 
         latents = inputs["latent"]
-        noise = keras.random.normal(ops.shape(latents), seed=self.seed_generator)
+        noise = keras.random.normal(ops.shape(latents), seed=self.seed)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         inputs = {
             "latent": noisy_latents,
