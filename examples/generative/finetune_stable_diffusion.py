@@ -134,10 +134,11 @@ and their corresponding caption tokens. The section will include the following:
 # RESOLUTION = 256
 RESOLUTION = 256
 BATCH_SIZE = 4
+DEBUG = True
 
 MAX_PROMPT_LENGTH = 77
 SEED = 42
-USE_MP = True
+USE_MP = not DEBUG
 
 if USE_MP:
     keras.mixed_precision.set_global_policy("mixed_float16")
@@ -407,6 +408,7 @@ optimizer = keras.optimizers.AdamW(
 diffusion_trainer.compile(
     optimizer=optimizer,
     loss="mse",
+    run_eagerly=DEBUG,
 )
 
 """
