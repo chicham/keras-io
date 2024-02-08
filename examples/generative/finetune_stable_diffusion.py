@@ -132,14 +132,8 @@ and their corresponding caption tokens. The section will include the following:
 """
 
 # RESOLUTION = 256
-DEBUG = True
-
-if DEBUG:
-    RESOLUTION = 256
-    BATCH_SIZE = 1
-else:
-    RESOLUTION = 256
-    BATCH_SIZE = 4
+RESOLUTION = 256
+BATCH_SIZE = 4
 
 MAX_PROMPT_LENGTH = 77
 SEED = 42
@@ -337,6 +331,7 @@ class StableDiffusionTrainer(keras.Model):
     def train_step(self, *args):
         backend = keras.backend.backend()
 
+        # TODO: Add other backend
         if backend == "jax":
             state, (inputs, targets) = args
         # elif backend == "torch":
@@ -362,7 +357,7 @@ class StableDiffusionTrainer(keras.Model):
             "context": inputs["context"]
         }
 
-        # TODO: test with more than 16G of memory
+        # TODO: Modify to support other backends
         ret = super().train_step(state, (inputs, targets))
         return ret
 
@@ -410,7 +405,6 @@ optimizer = keras.optimizers.AdamW(
 diffusion_trainer.compile(
     optimizer=optimizer,
     loss="mse",
-    run_eagerly=True,
 )
 
 """
@@ -444,12 +438,13 @@ the fine-tuned model parameters and model checkpointing.
 For this section, we'll use the checkpoint derived after 60 epochs of fine-tuning.
 """
 
-weights_path = tf.keras.utils.get_file(
+# TODO: Finetune the model then upload the checkpoint
+weights_path = keras.utils.get_file(
     origin="https://huggingface.co/sayakpaul/kerascv_sd_pokemon_finetuned/resolve/main/ckpt_epochs_72_res_512_mp_True.h5"
 )
 
-img_height = img_width = 512
-pokemon_model = keras_cv.models.StableDiffusion(
+img_height = img_width = RESOLUTION
+pokemon_model = models_cv.StableDiffusion(
     img_width=img_width, img_height=img_height
 )
 # We just reload the weights of the fine-tuned diffusion model.
@@ -482,7 +477,7 @@ We found the best results with this checkpoint with `unconditional_guidance_scal
 def plot_images(images, title):
     plt.figure(figsize=(20, 20))
     for i in range(len(images)):
-        ax = plt.subplot(1, len(images), i + 1)
+        _ = plt.subplot(1, len(images), i + 1)
         plt.imshow(images[i])
         plt.title(title, fontsize=12)
         plt.axis("off")
