@@ -238,7 +238,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             for caption, img in zip(batch_captions, batch_image_paths)
         ]
         batch_images, batch_tokens = zip(*batch)
-        batch_tokens = ops.stack(batch_tokens, axis=0)
+        batch_tokens = ops.concatenate(batch_tokens, axis=0)
         pos_ids = ops.repeat(get_pos_ids(), self.batch_size, axis=0)
         batch_context = self.text_encoder.predict_on_batch([batch_tokens, pos_ids])
         batch_images = augmenter(batch_images)
