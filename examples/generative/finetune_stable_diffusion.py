@@ -374,6 +374,18 @@ class StableDiffusionTrainer(keras.Model):
 
         return super().train_step((new_inputs, targets))
 
+    def save_weights(self, filepath, overwrite=True, save_format=None, options=None):
+        # Overriding this method will allow us to use the `ModelCheckpoint`
+        # callback directly with this trainer class. In this case, it will
+        # only checkpoint the `diffusion_model` since that's what we're training
+        # during fine-tuning.
+        self.diffusion_model.save_weights(
+            filepath=filepath,
+            overwrite=overwrite,
+            save_format=save_format,
+            options=options,
+        )
+
 
 """
 One important implementation detail to note here: Instead of directly taking
@@ -449,14 +461,15 @@ For this section, we'll use the checkpoint derived after 60 epochs of fine-tunin
 """
 
 # TODO: Finetune the model then upload the checkpoint
-weights_path = keras.utils.get_file(
-    origin="https://huggingface.co/sayakpaul/kerascv_sd_pokemon_finetuned/resolve/main/ckpt_epochs_72_res_512_mp_True.h5"
-)
+# weights_path = keras.utils.get_file(
+#     origin="https://huggingface.co/sayakpaul/kerascv_sd_pokemon_finetuned/resolve/main/ckpt_epochs_72_res_512_mp_True.h5"
+# )
 
 img_height = img_width = RESOLUTION
 pokemon_model = models_cv.StableDiffusion(img_width=img_width, img_height=img_height)
 # We just reload the weights of the fine-tuned diffusion model.
-pokemon_model.diffusion_model.load_weights(weights_path)
+# pokemon_model.diffusion_model.load_weights(weights_path)
+pokemon_model.diffusion_model = diffusion_trainer.diffusion_model
 
 """
 Now, we can take this model for a test-drive.
