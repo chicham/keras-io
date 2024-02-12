@@ -299,7 +299,7 @@ We can also take a look at the training images and their corresponding captions.
 
 plt.figure(figsize=(20, 10))
 
-for i in range(BATCH_SIZE):
+for i in range(3):
     ax = plt.subplot(1, 4, i + 1)
     plt.imshow((sample_batch["image"][i] + 1) / 2)
 
@@ -347,7 +347,7 @@ class StableDiffusionTrainer(keras.Model):
         if backend == "jax":
             state, (inputs, targets) = data
         else:
-            (inputs, targets), = data
+            ((inputs, targets),) = data
 
         batch_size = ops.shape(inputs["latent"])[0]
         timesteps = keras.random.randint(
