@@ -188,7 +188,6 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             use_multiprocessing=use_multiprocessing,
             max_queue_size=max_queue_size,
         )
-        # TODO: randomize
         self.captions = captions
         self.image_paths = image_paths
         self.batch_size = batch_size
@@ -208,12 +207,16 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         self.image_encoder = image_encoder
         self.seed = seed
 
+        indices = ops.arange(len(captions))
+        self.indices = random.shuffle(indices, seed=self.seed)
+
     def __getitem__(self, idx):
         # Return x, y for batch idx.
         low = idx * self.batch_size
         # Cap upper bound at array length; the last batch may be smaller
         # if the total number of items is not a multiple of batch size.
-        high = min(low + self.batch_size, len(self.captions))
+        high = min(low + self.batch_size, len(self.indices))
+        indices = self.indices[low:high]
 
         def transform_fn(image_path, caption):
             image = utils.load_img(image_path, target_size=(RESOLUTION, RESOLUTION))
@@ -230,17 +233,19 @@ class PokemonBlipDataset(keras.utils.PyDataset):
 
             return image, tokens
 
-        batch_captions = self.captions[low:high]
-        batch_image_paths = self.image_paths[low:high]
+        batch_captions = ops.take(self.captions, indices)
+        batch_image_paths = ops.take(self.image_paths, indices)
 
         batch = [
             transform_fn(img, caption)
             for caption, img in zip(batch_captions, batch_image_paths)
         ]
         batch_images, batch_tokens = zip(*batch)
+
+        pos_ids = ops.repeat(get_pos_ids(), len(batch_tokens), axis=0)
         batch_tokens = ops.concatenate(batch_tokens, axis=0)
-        pos_ids = ops.repeat(get_pos_ids(), self.batch_size, axis=0)
         batch_context = self.text_encoder.predict_on_batch([batch_tokens, pos_ids])
+
         batch_images = augmenter(batch_images)
         batch_latents = self.image_encoder.predict_on_batch(batch_images)
 
@@ -255,7 +260,10 @@ class PokemonBlipDataset(keras.utils.PyDataset):
 
     def __len__(self):
         # Return number of batches.
-        return math.ceil(len(self.captions) / self.batch_size)
+        return math.ceil(len(self.indices) / self.batch_size)
+
+    def on_epoch_end(self):
+        self.indices = random.shuffle(self.indices, seed=self.seed)
 
 
 """
