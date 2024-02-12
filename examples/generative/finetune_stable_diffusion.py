@@ -33,7 +33,7 @@ at least TensorFlow 2.11 in order to use AdamW with mixed precision.
 """
 
 """shell
-pip uninstall tensorflow keras-core
+pip uninstall -y tensorflow keras-core
 pip install keras==3.0.4 keras-cv==0.8.2 jax[cuda12_pip]==0.4.24 tf-nightly-cpu==2.16.0.dev20240101
 """
 """
