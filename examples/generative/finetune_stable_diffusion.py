@@ -85,7 +85,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from keras_cv import models as models_cv
 from keras import ops, layers, utils, models
-import random
+from keras import random
 import itertools
 import math
 
@@ -185,14 +185,14 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         seed=42,
         use_multiprocessing: bool = False,
         max_queue_size: int = 10,
-    ):
+        ):
         super().__init__(
             workers=workers,
             use_multiprocessing=use_multiprocessing,
             max_queue_size=max_queue_size,
         )
-        self.captions = captions
-        self.image_paths = image_paths
+        self.captions = ops.convert_to_numpy(captions)
+        self.image_paths = ops.convert_to_numpy(image_paths)
         self.batch_size = batch_size
 
         if tokenizer is None:
@@ -236,8 +236,9 @@ class PokemonBlipDataset(keras.utils.PyDataset):
 
             return image, tokens
 
-        batch_captions = ops.take(self.captions, indices)
-        batch_image_paths = ops.take(self.image_paths, indices)
+        # TODO: do not use keras for shuffling but python function
+        batch_captions = self.captions[indices]
+        batch_image_paths = self.image_paths[indices]
 
         batch = [
             transform_fn(img, caption)
@@ -289,6 +290,7 @@ training_dataset = PokemonBlipDataset(
     tokenizer=tokenizer,
     text_encoder=text_encoder,
     image_encoder=image_encoder,
+    use_multiprocessing=not DEBUG,
 )
 # Take a sample batch and investigate.
 sample_batch, _ = training_dataset[0]
