@@ -79,7 +79,7 @@ Don't worry if this sounds complicated. The code is much simpler than this!
 from textwrap import wrap
 import os
 
-os.environ.setdefault("KERAS_BACKEND", "jax")
+os.environ.setdefault("KERAS_BACKEND", "tensorflow")
 
 import keras
 import matplotlib.pyplot as plt
