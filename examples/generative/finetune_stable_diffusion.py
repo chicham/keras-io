@@ -357,7 +357,7 @@ class StableDiffusionTrainer(keras.Model):
         return preds
 
     def sample_from_image_encoder(self, outputs):
-        mean, logvar = ops.split(outputs, axis=1)
+        mean, logvar = ops.split(outputs, 2, axis=1)
         logvar = ops.clip(logvar, -30, 20)
         std = ops.exp(0.5 * logvar)
         sample = random.normal(ops.shape(mean), dtype=mean.dtype)
