@@ -487,8 +487,7 @@ For this section, we'll use the checkpoint derived after 60 epochs of fine-tunin
 img_height = img_width = RESOLUTION
 pokemon_model = models_cv.StableDiffusion(img_width=img_width, img_height=img_height)
 # We just reload the weights of the fine-tuned diffusion model.
-# pokemon_model.diffusion_model.load_weights(weights_path)
-pokemon_model.diffusion_model = diffusion_trainer.diffusion_model
+pokemon_model.diffusion_model.load_weights(CKPT_PATH)
 
 """
 Now, we can take this model for a test-drive.
