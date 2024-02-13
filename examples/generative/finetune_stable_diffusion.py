@@ -161,6 +161,7 @@ def get_timestep_embeddings(timesteps, dim=320, max_period=10000, dtype="float32
     half = dim // 2
     span = ops.cast(ops.arange(0, half), dtype=dtype)
     span = ops.reshape(span, (1, -1))
+    max_period = ops.cast(max_period, dtype=span.dtype)
     freqs = ops.exp(-ops.log(max_period) * span / half)
     timesteps = ops.cast(timesteps, dtype=dtype)
     timesteps = ops.reshape(timesteps, (-1, 1))
