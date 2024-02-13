@@ -233,7 +233,10 @@ class PokemonBlipDataset(keras.utils.PyDataset):
                 )
             # TODO: Retrieve the eof token from the tokenizer
             tokens = ops.convert_to_tensor(
-                [tokens + [49407] * (MAX_PROMPT_LENGTH - len(tokens))]
+                [
+                    tokens
+                    + [self.tokenizer.end_of_text] * (MAX_PROMPT_LENGTH - len(tokens))
+                ]
             )
 
             return image, tokens
@@ -292,7 +295,7 @@ training_dataset = PokemonBlipDataset(
     tokenizer=tokenizer,
     text_encoder=text_encoder,
     image_encoder=image_encoder,
-    use_multiprocessing=not DEBUG,
+    use_multiprocessing=False,
 )
 # Take a sample batch and investigate.
 sample_batch, _ = training_dataset[0]
@@ -389,8 +392,6 @@ class StableDiffusionTrainer(keras.Model):
         self.diffusion_model.save_weights(
             filepath=filepath,
             overwrite=overwrite,
-            save_format=save_format,
-            options=options,
         )
 
 
@@ -434,7 +435,9 @@ optimizer = keras.optimizers.AdamW(
     epsilon=epsilon,
 )
 
-diffusion_trainer.compile(optimizer=optimizer, loss="mse", run_eagerly=DEBUG)
+diffusion_trainer.compile(
+    optimizer=optimizer, loss="mse", auto_scale_loss=True, jit_compile="auto"
+)
 
 """
 ## Fine-tuning
@@ -442,16 +445,14 @@ diffusion_trainer.compile(optimizer=optimizer, loss="mse", run_eagerly=DEBUG)
 To keep the runtime of this tutorial short, we just fine-tune for an epoch.
 """
 
-epochs = 1
-ckpt_path = "finetuned_stable_diffusion.weights.h5"
 ckpt_callback = keras.callbacks.ModelCheckpoint(
-    ckpt_path,
+    CKPT_PATH,
     save_weights_only=True,
     monitor="loss",
     mode="min",
 )
 
-diffusion_trainer.fit(training_dataset, epochs=epochs, callbacks=[ckpt_callback])
+diffusion_trainer.fit(training_dataset, epochs=N_EPOCHS, callbacks=[ckpt_callback])
 
 """
 ## Inference
