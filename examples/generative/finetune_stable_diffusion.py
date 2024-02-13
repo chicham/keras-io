@@ -174,6 +174,12 @@ def get_pos_ids():
     # TODO(hicham): Can be a constant ?
     return ops.expand_dims(ops.arange(MAX_PROMPT_LENGTH, dtype="int32"), 0)
 
+def sample_normal(embeddings, seed=None):
+    mean, logvar = ops.split(embeddings, 2, axis=-1)
+    logvar = ops.clip(logvar, -30, 20)
+    std = ops.exp(0.5 * logvar)
+    sample = random.normal(ops.shape(mean), dtype=mean.dtype, seed=seed)
+    return mean + std * sample
 
 class PokemonBlipDataset(keras.utils.PyDataset):
     def __init__(
@@ -257,7 +263,8 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         batch_context = self.text_encoder.predict_on_batch([batch_tokens, pos_ids])
 
         batch_images = augmenter(batch_images)
-        batch_latents = self.image_encoder.predict_on_batch(batch_images)
+        batch_embeddings = self.image_encoder.predict_on_batch(batch_images)
+        batch_latents = sample_normal(batch_embeddings, seed=self.seed)
 
         inputs = {
             "image": batch_images,
@@ -340,8 +347,8 @@ class StableDiffusionTrainer(keras.Model):
 
     def call(self, inputs):
         new_inputs = {
-            "latent": inputs["latent"],
             "context": inputs["context"],
+            "latent": inputs["latent"],
         }
         if "timestep_embedding" not in inputs:
             batch_size = ops.shape(inputs["latent"])[0]
@@ -356,12 +363,6 @@ class StableDiffusionTrainer(keras.Model):
         preds = self.diffusion_model(new_inputs)
         return preds
 
-    def sample_from_image_encoder(self, outputs):
-        mean, logvar = ops.split(outputs, 2, axis=1)
-        logvar = ops.clip(logvar, -30, 20)
-        std = ops.exp(0.5 * logvar)
-        sample = random.normal(ops.shape(mean), dtype=mean.dtype)
-        return mean + std * sample
 
     def train_step(self, *data):
         backend = keras.backend.backend()
@@ -371,16 +372,14 @@ class StableDiffusionTrainer(keras.Model):
         else:
             ((inputs, targets),) = data
 
-        batch_size = ops.shape(inputs["latent"])[0]
+        latents = inputs["latent"]
+        batch_size = ops.shape(latents)[0]
         timesteps = keras.random.randint(
             (batch_size,),
             0,
             self.noise_scheduler.train_timesteps,
             seed=self.seed,
         )
-
-        latents = self.sample_from_image_encoder(inputs["latent"])
-        latents = latents * 0.1815
 
         timesteps_embeddings = get_timestep_embeddings(timesteps, dtype=latents.dtype)
         noisy_latents = self.noise_scheduler.add_noise(latents, targets, timesteps)
