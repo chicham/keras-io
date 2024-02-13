@@ -174,12 +174,14 @@ def get_pos_ids():
     # TODO(hicham): Can be a constant ?
     return ops.expand_dims(ops.arange(MAX_PROMPT_LENGTH, dtype="int32"), 0)
 
+
 def sample_normal(embeddings, seed=None):
     mean, logvar = ops.split(embeddings, 2, axis=-1)
     logvar = ops.clip(logvar, -30, 20)
     std = ops.exp(0.5 * logvar)
     sample = random.normal(ops.shape(mean), dtype=mean.dtype, seed=seed)
     return mean + std * sample
+
 
 class PokemonBlipDataset(keras.utils.PyDataset):
     def __init__(
@@ -296,7 +298,9 @@ interactive demonstrations, we kept the input resolution to 256x256.
 # Prepare the dataset.
 tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
 text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
-image_encoder = models_cv.stable_diffusion.ImageEncoder()
+image_encoder = keras.Sequential(
+    models_cv.stable_diffusion.ImageEncoder().layers[:-1]
+)
 
 training_dataset = PokemonBlipDataset(
     captions=all_captions,
@@ -362,7 +366,6 @@ class StableDiffusionTrainer(keras.Model):
 
         preds = self.diffusion_model(new_inputs)
         return preds
-
 
     def train_step(self, *data):
         backend = keras.backend.backend()
