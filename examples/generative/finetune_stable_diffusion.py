@@ -135,14 +135,15 @@ and their corresponding caption tokens. The section will include the following:
 * Shuffling and batching of the dataset.
 """
 
-# RESOLUTION = 256
 RESOLUTION = 256
-BATCH_SIZE = 4
-DEBUG = True
+BATCH_SIZE = 16
+N_EPOCHS = 100
 
 MAX_PROMPT_LENGTH = 77
 SEED = 42
-USE_MP = not DEBUG
+USE_MP = True
+
+CKPT_PATH = "finetuned_stable_diffusion.weights.h5"
 
 if USE_MP:
     keras.mixed_precision.set_global_policy("mixed_float16")
