@@ -187,7 +187,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         seed=42,
         use_multiprocessing: bool = False,
         max_queue_size: int = 10,
-        ):
+    ):
         super().__init__(
             workers=workers,
             use_multiprocessing=use_multiprocessing,
@@ -345,7 +345,9 @@ class StableDiffusionTrainer(keras.Model):
         if "timestep_embedding" not in inputs:
             batch_size = ops.shape(inputs["latent"])[0]
             timesteps = ops.arange(0, batch_size)
-            timestep_embeddings = get_timestep_embeddings(timesteps)
+            timestep_embeddings = get_timestep_embeddings(
+                timesteps, dtype=inputs["latent"].dtype
+            )
             new_inputs["timestep_embedding"] = timestep_embeddings
         else:
             new_inputs["timestep_embedding"] = inputs["timestep_embedding"]
@@ -353,10 +355,16 @@ class StableDiffusionTrainer(keras.Model):
         preds = self.diffusion_model(new_inputs)
         return preds
 
+    def sample_from_image_encoder(self, outputs):
+        mean, logvar = ops.split(outputs, axis=1)
+        logvar = ops.clip(logvar, -30, 20)
+        std = ops.exp(0.5 * logvar)
+        sample = random.normal(ops.shape(mean), dtype=mean.dtype)
+        return mean + std * sample
+
     def train_step(self, *data):
         backend = keras.backend.backend()
 
-        # TODO: Add other backend
         if backend == "jax":
             state, (inputs, targets) = data
         else:
@@ -427,7 +435,7 @@ diffusion_trainer = StableDiffusionTrainer(
 # https://huggingface.co/docs/diffusers/training/text2image
 lr = 1e-5
 beta_1, beta_2 = 0.9, 0.999
-weight_decay = (1e-2,)
+weight_decay = 1e-2
 epsilon = 1e-08
 
 optimizer = keras.optimizers.AdamW(
