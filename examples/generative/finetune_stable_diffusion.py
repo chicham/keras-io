@@ -151,7 +151,7 @@ if USE_MP:
 augmenter = models.Sequential(
     layers=[
         layers.CenterCrop(RESOLUTION, RESOLUTION),
-        layers.RandomFlip(),
+        layers.RandomFlip(seed=SEED),
         layers.Rescaling(scale=1.0 / 127.5, offset=-1),
     ]
 )
@@ -207,7 +207,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         self.text_encoder = text_encoder
 
         if image_encoder is None:
-            image_encoder = models_cv.stable_diffusion.ImageEncoder(MAX_PROMPT_LENGTH)
+            image_encoder = models_cv.stable_diffusion.ImageEncoder()
 
         self.image_encoder = image_encoder
         self.seed = seed
@@ -264,7 +264,9 @@ class PokemonBlipDataset(keras.utils.PyDataset):
             "context": batch_context,
             "latent": batch_latents,
         }
-        targets = keras.random.normal(ops.shape(batch_latents), seed=self.seed)
+        targets = keras.random.normal(
+            ops.shape(batch_latents), seed=self.seed, dtype=batch_latents.dtype
+        )
         return inputs, targets
 
     def __len__(self):
@@ -311,7 +313,8 @@ plt.figure(figsize=(20, 10))
 
 for i in range(3):
     ax = plt.subplot(1, 4, i + 1)
-    plt.imshow((sample_batch["image"][i] + 1) / 2)
+    img = ops.cast(sample_batch["image"][i], dtype="float32")
+    plt.imshow((img + 1.0) / 2)
 
     tokens = ops.convert_to_numpy(sample_batch["token"][i])
     text = tokenizer.decode(tokens)
