@@ -377,11 +377,12 @@ class StableDiffusionTrainer(keras.Model):
             self.noise_scheduler.train_timesteps,
             seed=self.seed,
         )
-        timesteps_embeddings = get_timestep_embeddings(timesteps)
 
-        latents = inputs["latent"]
-        noise = keras.random.normal(ops.shape(latents), seed=self.seed)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        latents = self.sample_from_image_encoder(inputs["latent"])
+        latents = latents * 0.1815
+
+        timesteps_embeddings = get_timestep_embeddings(timesteps, dtype=latents.dtype)
+        noisy_latents = self.noise_scheduler.add_noise(latents, targets, timesteps)
         new_inputs = {
             "latent": noisy_latents,
             "timestep_embedding": timesteps_embeddings,
