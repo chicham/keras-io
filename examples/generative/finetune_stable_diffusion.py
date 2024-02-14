@@ -212,6 +212,7 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         self.image_paths = ops.convert_to_numpy(image_paths)
         self.batch_size = batch_size
         self.max_prompt_length = max_prompt_length
+        self.resolution = resolution
 
         if tokenizer is None:
             tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
@@ -321,6 +322,8 @@ training_dataset = PokemonBlipDataset(
     text_encoder=text_encoder,
     vae=vae,
     use_multiprocessing=False,
+    resolution=RESOLUTION,
+    max_prompt_length=MAX_PROMPT_LENGTH,
 )
 # Take a sample batch and investigate.
 sample_batch, _ = training_dataset[0]
