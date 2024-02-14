@@ -90,6 +90,8 @@ from keras import random
 import itertools
 import math
 
+# %load_ext tensorboard
+
 """
 ## Data loading
 
@@ -460,6 +462,9 @@ diffusion_trainer.compile(
 To keep the runtime of this tutorial short, we just fine-tune for an epoch.
 """
 
+# %tensorboard --logdir ./logs
+
+
 ckpt_callback = keras.callbacks.ModelCheckpoint(
     CKPT_PATH,
     save_weights_only=True,
@@ -467,7 +472,10 @@ ckpt_callback = keras.callbacks.ModelCheckpoint(
     mode="min",
 )
 
-diffusion_trainer.fit(training_dataset, epochs=N_EPOCHS, callbacks=[ckpt_callback])
+diffusion_trainer.fit(training_dataset, epochs=N_EPOCHS, callbacks=[
+    ckpt_callback,
+    keras.callbacks.TensorBoard(log_dir='./logs'),
+])
 
 """
 ## Inference
