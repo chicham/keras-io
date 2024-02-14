@@ -194,7 +194,9 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         workers: int = 1,
         tokenizer=None,
         text_encoder=None,
-        image_encoder=None,
+        vae=None,
+        max_prompt_length=MAX_PROMPT_LENGTH,
+        resolution=RESOLUTION,
         seed=42,
         use_multiprocessing: bool = False,
         max_queue_size: int = 10,
@@ -207,24 +209,26 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         self.captions = ops.convert_to_numpy(captions)
         self.image_paths = ops.convert_to_numpy(image_paths)
         self.batch_size = batch_size
+        self.max_prompt_length = max_prompt_length
 
         if tokenizer is None:
             tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
         self.tokenizer = tokenizer
 
         if text_encoder is None:
-            text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
+            text_encoder = models_cv.stable_diffusion.TextEncoder(self.max_prompt_length)
 
         self.text_encoder = text_encoder
 
-        if image_encoder is None:
-            image_encoder = models_cv.stable_diffusion.ImageEncoder()
+        if vae is None:
+            vae = models_cv.stable_diffusion.ImageEncoder()
 
-        self.image_encoder = image_encoder
+        self.vae = vae
         self.seed = seed
 
         indices = ops.arange(len(captions))
         self.indices = random.shuffle(indices, seed=self.seed)
+        self.end_of_text_token = self.tokenizer.end_of_text
 
     def __getitem__(self, idx):
         # Return x, y for batch idx.
@@ -267,8 +271,9 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         batch_context = self.text_encoder.predict_on_batch([batch_tokens, pos_ids])
 
         batch_images = augmenter(batch_images)
-        batch_embeddings = self.image_encoder.predict_on_batch(batch_images)
+        batch_embeddings = self.vae.predict_on_batch(batch_images)
         batch_latents = sample_normal(batch_embeddings, seed=self.seed)
+        batch_latents = batch_latents * 0.18215
 
         inputs = {
             "image": batch_images,
@@ -300,8 +305,10 @@ interactive demonstrations, we kept the input resolution to 256x256.
 # Prepare the dataset.
 tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
 text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
-image_encoder = keras.Sequential(
-    models_cv.stable_diffusion.ImageEncoder().layers[:-1]
+image_encoder = models_cv.stable_diffusion.ImageEncoder()
+
+vae=keras.Sequential(
+    layers[:-1]
 )
 
 training_dataset = PokemonBlipDataset(
@@ -310,7 +317,7 @@ training_dataset = PokemonBlipDataset(
     batch_size=BATCH_SIZE,
     tokenizer=tokenizer,
     text_encoder=text_encoder,
-    image_encoder=image_encoder,
+    vae=vae,
     use_multiprocessing=False,
 )
 # Take a sample batch and investigate.
