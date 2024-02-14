@@ -221,11 +221,13 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         if text_encoder is None:
             text_encoder = models_cv.stable_diffusion.TextEncoder(self.max_prompt_length)
 
+        text_encoder.trainable = False
         self.text_encoder = text_encoder
 
         if vae is None:
             vae = models_cv.stable_diffusion.ImageEncoder()
 
+        vae.trainable = False
         self.vae = vae
         self.seed = seed
 
@@ -360,6 +362,7 @@ class StableDiffusionTrainer(keras.Model):
     def __init__(self, diffusion_model, noise_scheduler, seed: int = None):
         super().__init__()
         self.diffusion_model = diffusion_model
+        noise_scheduler.trainable = False
         self.noise_scheduler = noise_scheduler
         self.seed = seed
 
