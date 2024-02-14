@@ -139,7 +139,8 @@ and their corresponding caption tokens. The section will include the following:
 
 RESOLUTION = 256
 BATCH_SIZE = 16
-N_EPOCHS = 100
+# N_EPOCHS = 100
+N_EPOCHS = 5
 
 MAX_PROMPT_LENGTH = 77
 SEED = 42
@@ -239,18 +240,18 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         indices = self.indices[low:high]
 
         def transform_fn(image_path, caption):
-            image = utils.load_img(image_path, target_size=(RESOLUTION, RESOLUTION))
+            image = utils.load_img(image_path, target_size=(self.resolution, self.resolution))
             image = ops.convert_to_tensor(image)
             tokens = self.tokenizer.encode(caption)
-            if len(tokens) > MAX_PROMPT_LENGTH:
+            if len(tokens) > self.max_prompt_length:
                 raise ValueError(
-                    f"Prompt is too long (should be <= {MAX_PROMPT_LENGTH} tokens)"
+                    f"Prompt is too long (should be <= {self.max_prompt_length} tokens)"
                 )
             # TODO: Retrieve the eof token from the tokenizer
             tokens = ops.convert_to_tensor(
                 [
                     tokens
-                    + [self.tokenizer.end_of_text] * (MAX_PROMPT_LENGTH - len(tokens))
+                    + [self.end_of_text_token] * (self.max_prompt_length - len(tokens))
                 ]
             )
 
