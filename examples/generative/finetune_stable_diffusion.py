@@ -38,6 +38,7 @@ pip uninstall -y tensorflow
 # pip install keras==3.0.4 keras-cv==0.8.2 jax[cuda12_pip]==0.4.24 tf-nightly-cpu==2.16.0.dev20240101 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 pip install -q keras==3.0.4 keras-cv==0.8.2 tf-nightly[and-cuda]==2.16.0.dev20240101
 """
+
 """
 ## What are we fine-tuning?
 
@@ -309,7 +310,7 @@ text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
 image_encoder = models_cv.stable_diffusion.ImageEncoder()
 
 vae=keras.Sequential(
-    layers[:-1]
+    image_encoder.layers[:-1]
 )
 
 training_dataset = PokemonBlipDataset(
