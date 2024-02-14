@@ -451,6 +451,9 @@ lr = 1e-5
 beta_1, beta_2 = 0.9, 0.999
 weight_decay = 1e-2
 epsilon = 1e-08
+clipnorm = 1.
+use_ema=True
+ema_momentum = 0.9999
 
 optimizer = keras.optimizers.AdamW(
     learning_rate=lr,
@@ -458,6 +461,8 @@ optimizer = keras.optimizers.AdamW(
     beta_1=beta_1,
     beta_2=beta_2,
     epsilon=epsilon,
+    clipnorm=clipnorm,
+    use_ema=use_ema,
 )
 
 diffusion_trainer.compile(
