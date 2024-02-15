@@ -190,9 +190,9 @@ class PokemonBlipDataset(keras.utils.PyDataset):
         batch_size: int,
         workers: int = 1,
         tokenizer=None,
-        max_prompt_length=MAX_PROMPT_LENGTH,
-        resolution=RESOLUTION,
-        seed=42,
+        max_prompt_length: int = MAX_PROMPT_LENGTH,
+        resolution: int = RESOLUTION,
+        seed: int = 42,
         use_multiprocessing: bool = False,
         max_queue_size: int = 10,
         end_of_text_token: int = None,
@@ -257,7 +257,6 @@ class PokemonBlipDataset(keras.utils.PyDataset):
 
         batch_images = augmenter(batch_images)
 
-
         targets = keras.random.normal(
             (self.batch_size, self.resolution // 8, self.resolution // 8, 4),
             seed=self.seed,
@@ -289,10 +288,6 @@ interactive demonstrations, we kept the input resolution to 256x256.
 
 # Prepare the dataset.
 tokenizer = models_cv.stable_diffusion.SimpleTokenizer()
-text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
-image_encoder = models_cv.stable_diffusion.ImageEncoder()
-
-vae = keras.Sequential(image_encoder.layers[:-1])
 
 all_captions = data_frame["caption"].to_list()
 all_image_paths = data_frame["image_path"].to_list()
@@ -303,8 +298,6 @@ training_dataset = PokemonBlipDataset(
     image_paths=all_image_paths,
     batch_size=BATCH_SIZE,
     tokenizer=tokenizer,
-    text_encoder=text_encoder,
-    vae=vae,
     use_multiprocessing=False,
     resolution=RESOLUTION,
     max_prompt_length=MAX_PROMPT_LENGTH,
@@ -343,7 +336,12 @@ for i in range(3):
 
 class StableDiffusionTrainer(keras.Model):
     def __init__(
-        self, diffusion_model, noise_scheduler, text_encoder, vae, seed: int = None
+        self,
+        diffusion_model: keras.Model,
+        noise_scheduler: keras.Model,
+        text_encoder: keras.Model,
+        vae: keras.Model,
+        seed: int = None,
     ):
         super().__init__()
         self.diffusion_model = diffusion_model
@@ -369,10 +367,10 @@ class StableDiffusionTrainer(keras.Model):
             self.noise_scheduler.train_timesteps,
             seed=self.seed,
         )
-        timestep_embeddings = get_timestep_embeddings(
-            timesteps, dtype=latents.dtype
+        timestep_embeddings = get_timestep_embeddings(timesteps, dtype=latents.dtype)
+        noisy_latents = self.noise_scheduler.add_noise(
+            latents, inputs["noise"], timesteps
         )
-        noisy_latents = self.noise_scheduler.add_noise(latents, inputs["noise"], timesteps)
         preds = self.diffusion_model(
             {
                 "context": contexts,
@@ -413,9 +411,15 @@ of brevity, we discard those elements. More on this later in the tutorial.
 diffusion_model = models_cv.stable_diffusion.DiffusionModel(
     RESOLUTION, RESOLUTION, MAX_PROMPT_LENGTH
 )
+text_encoder = models_cv.stable_diffusion.TextEncoder(MAX_PROMPT_LENGTH)
+image_encoder = models_cv.stable_diffusion.ImageEncoder()
+
+vae = keras.Sequential(image_encoder.layers[:-1])
 diffusion_trainer = StableDiffusionTrainer(
     diffusion_model=diffusion_model,
     noise_scheduler=models_cv.stable_diffusion.NoiseScheduler(),
+    text_encoder=text_encoder,
+    vae=vae,
 )
 
 # These hyperparameters come from this tutorial by Hugging Face:
