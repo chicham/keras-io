@@ -356,8 +356,8 @@ class StableDiffusionTrainer(keras.Model):
     def call(self, inputs):
         batch_size = ops.shape(inputs["token"])[0]
         pos_ids = ops.repeat(POS_IDS, batch_size, axis=0)
-        contexts = self.text_encoder.predict_on_batch([inputs["token"], pos_ids])
-        embeddings = self.vae.predict_on_batch(inputs["image"])
+        contexts = self.text_encoder([inputs["token"], pos_ids])
+        embeddings = self.vae(inputs["image"])
         latents = sample_normal(embeddings, seed=self.seed)
         latents = latents * 0.18215
 
