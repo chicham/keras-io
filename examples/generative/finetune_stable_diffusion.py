@@ -138,7 +138,7 @@ import os
 os.environ.setdefault("KERAS_BACKEND", "tensorflow")
 
 RESOLUTION = 256
-BATCH_SIZE = 4
+BATCH_SIZE = 32
 # N_EPOCHS = 100
 N_EPOCHS = 50
 
