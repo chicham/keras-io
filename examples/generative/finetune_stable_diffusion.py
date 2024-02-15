@@ -78,9 +78,6 @@ Don't worry if this sounds complicated. The code is much simpler than this!
 """
 
 from textwrap import wrap
-import os
-
-os.environ.setdefault("KERAS_BACKEND", "tensorflow")
 
 import keras
 import matplotlib.pyplot as plt
@@ -137,9 +134,11 @@ and their corresponding caption tokens. The section will include the following:
 * Loading and augmentation of the input images.
 * Shuffling and batching of the dataset.
 """
+import os
+os.environ.setdefault("KERAS_BACKEND", "tensorflow")
 
 RESOLUTION = 256
-BATCH_SIZE = 16
+BATCH_SIZE = 4
 # N_EPOCHS = 100
 N_EPOCHS = 5
 
